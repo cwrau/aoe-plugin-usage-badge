@@ -1,9 +1,4 @@
-// AoE session lookup. The host's sessions.list RPC does not expose a
-// session's Claude (ACP) session id, which is what names its transcript, so
-// the mapping is read from the host's session store. That file is a host
-// internal: when it can't be read or parsed the composer badges simply don't
-// update, and nothing else is affected.
-package main
+package attribution
 
 import (
 	"encoding/json"
@@ -12,11 +7,14 @@ import (
 	"path/filepath"
 )
 
-// aoeSession is a live AoE session and the Claude session its transcript is
-// named after.
-type aoeSession struct {
-	id         string
-	transcript string
+// Session is a live AoE session and the Claude session its transcript is
+// named after. The host's sessions.list RPC does not expose that Claude (ACP)
+// session id, so the mapping is read from the host's session store. That file
+// is a host internal: when it can't be read or parsed the composer badges
+// simply don't update, and nothing else is affected.
+type Session struct {
+	ID         string
+	Transcript string
 }
 
 type storedSession struct {
@@ -30,7 +28,8 @@ func isSet(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null" && string(raw) != `""`
 }
 
-func aoeConfigDir() (string, error) {
+// AoEConfigDir is the Agent of Empires config directory.
+func AoEConfigDir() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -38,14 +37,14 @@ func aoeConfigDir() (string, error) {
 	return filepath.Join(dir, "agent-of-empires"), nil
 }
 
-// loadLiveSessions reads every profile's session store and returns the
+// LoadLiveSessions reads every profile's session store and returns the
 // sessions that are neither archived nor trashed and have a Claude session id.
-func loadLiveSessions(configDir string) ([]aoeSession, error) {
+func LoadLiveSessions(configDir string) ([]Session, error) {
 	stores, err := filepath.Glob(filepath.Join(configDir, "profiles", "*", "sessions.json"))
 	if err != nil {
 		return nil, err
 	}
-	var sessions []aoeSession
+	var sessions []Session
 	for _, store := range stores {
 		data, err := os.ReadFile(store)
 		if err != nil {
@@ -59,7 +58,7 @@ func loadLiveSessions(configDir string) ([]aoeSession, error) {
 			if s.ID == "" || s.ACPSession == "" || isSet(s.ArchivedAt) || isSet(s.TrashedAt) {
 				continue
 			}
-			sessions = append(sessions, aoeSession{id: s.ID, transcript: s.ACPSession})
+			sessions = append(sessions, Session{ID: s.ID, Transcript: s.ACPSession})
 		}
 	}
 	return sessions, nil

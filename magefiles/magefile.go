@@ -25,7 +25,7 @@ const golangciLintPkg = "github.com/golangci/golangci-lint/v2/cmd/golangci-lint"
 
 // Build compiles the plugin worker binary.
 func Build() error {
-	return sh.RunV("go", "build", "-o", workerBinary, ".")
+	return sh.RunV("go", "build", "-o", workerBinary, "./cmd/usage-badge-worker")
 }
 
 // Test runs the full test suite.

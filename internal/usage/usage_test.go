@@ -1,4 +1,4 @@
-package main
+package usage
 
 import (
 	"strings"
@@ -24,10 +24,10 @@ func TestParseUsageWindowSession(t *testing.T) {
 	if !ok {
 		t.Fatal("session line not found")
 	}
-	if w.usedPercent != 51 {
-		t.Errorf("usedPercent = %d, want 51", w.usedPercent)
+	if w.UsedPercent != 51 {
+		t.Errorf("usedPercent = %d, want 51", w.UsedPercent)
 	}
-	if !w.hasReset {
+	if !w.HasReset {
 		t.Fatal("hasReset = false, want true")
 	}
 }
@@ -39,8 +39,8 @@ func TestParseUsageWindowWeekIgnoresPerModelLines(t *testing.T) {
 	}
 	// The output also has a "Current week (Fable): 0% used" line right
 	// after it; weekLineRe must not match that one instead.
-	if w.usedPercent != 15 {
-		t.Errorf("usedPercent = %d, want 15 (not the per-model 0%%)", w.usedPercent)
+	if w.UsedPercent != 15 {
+		t.Errorf("usedPercent = %d, want 15 (not the per-model 0%%)", w.UsedPercent)
 	}
 }
 
@@ -89,8 +89,8 @@ func TestParseResetTimeRollsYearForwardAcrossDecemberWrap(t *testing.T) {
 
 func TestIdealPercentHalfwayThroughWindow(t *testing.T) {
 	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
-	resetsAt := now.Add(sessionWindow / 2) // half of the 5h session window left
-	ideal, ok := idealPercent(resetsAt, now, sessionWindow)
+	resetsAt := now.Add(SessionWindow / 2) // half of the 5h session window left
+	ideal, ok := idealPercent(resetsAt, now, SessionWindow)
 	if !ok {
 		t.Fatal("idealPercent returned ok=false")
 	}
@@ -100,7 +100,7 @@ func TestIdealPercentHalfwayThroughWindow(t *testing.T) {
 }
 
 func TestIdealPercentNoResetTime(t *testing.T) {
-	if _, ok := idealPercent(time.Time{}, time.Now(), sessionWindow); ok {
+	if _, ok := idealPercent(time.Time{}, time.Now(), SessionWindow); ok {
 		t.Error("got ok=true with a zero resetsAt")
 	}
 }
@@ -109,13 +109,13 @@ func TestIdealPercentClampsPastWindowEdges(t *testing.T) {
 	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 
 	// resetsAt already passed: elapsed would exceed the window, must clamp to 100.
-	ideal, ok := idealPercent(now.Add(-time.Hour), now, sessionWindow)
+	ideal, ok := idealPercent(now.Add(-time.Hour), now, SessionWindow)
 	if !ok || ideal != 100 {
 		t.Errorf("ideal = %v, ok = %v, want 100, true", ideal, ok)
 	}
 
 	// resetsAt further out than a full window: elapsed would go negative, must clamp to 0.
-	ideal, ok = idealPercent(now.Add(sessionWindow*2), now, sessionWindow)
+	ideal, ok = idealPercent(now.Add(SessionWindow*2), now, SessionWindow)
 	if !ok || ideal != 0 {
 		t.Errorf("ideal = %v, ok = %v, want 0, true", ideal, ok)
 	}
@@ -157,11 +157,11 @@ func TestPaceToneFallsBackToFixedThresholdsWithoutIdeal(t *testing.T) {
 
 func TestPaceLabelIncludesTimeEquivalent(t *testing.T) {
 	// 13pts of a 5h session window = 39m.
-	if got, want := paceLabel(100, 87, true, sessionWindow), "13pts (39m) ahead of pace"; got != want {
+	if got, want := paceLabel(100, 87, true, SessionWindow), "13pts (39m) ahead of pace"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 	// 7pts under pace on the same window = 21m.
-	if got, want := paceLabel(13, 20, true, sessionWindow), "7pts (21m) under pace"; got != want {
+	if got, want := paceLabel(13, 20, true, SessionWindow), "7pts (21m) under pace"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
@@ -181,7 +181,7 @@ func TestPaceShort(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := paceShort(c.usedPercent, c.ideal, c.hasIdeal, sessionWindow); got != c.want {
+			if got := paceShort(c.usedPercent, c.ideal, c.hasIdeal, SessionWindow); got != c.want {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
 		})
@@ -189,13 +189,13 @@ func TestPaceShort(t *testing.T) {
 }
 
 func TestPaceLabelOnPaceOmitsTimeEquivalent(t *testing.T) {
-	if got, want := paceLabel(50, 50, true, sessionWindow), "on pace"; got != want {
+	if got, want := paceLabel(50, 50, true, SessionWindow), "on pace"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
 func TestPaceLabelEmptyWithoutIdeal(t *testing.T) {
-	if got := paceLabel(50, 0, false, sessionWindow); got != "" {
+	if got := paceLabel(50, 0, false, SessionWindow); got != "" {
 		t.Errorf("got %q, want empty", got)
 	}
 }
@@ -203,9 +203,9 @@ func TestPaceLabelEmptyWithoutIdeal(t *testing.T) {
 func TestWindowItemsUsageThenPace(t *testing.T) {
 	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 	// 39m left of a 5h window = 87% elapsed; 100% used is 13pts ahead.
-	w := usageWindow{usedPercent: 100, resetsAt: now.Add(39 * time.Minute), hasReset: true}
+	w := Window{UsedPercent: 100, ResetsAt: now.Add(39 * time.Minute), HasReset: true}
 
-	items := windowItems("S", "Session", w, sessionWindow, now)
+	items := windowItems("S", "Session", w, SessionWindow, now)
 	if len(items) != 2 {
 		t.Fatalf("got %d items, want 2 (usage, pace): %+v", len(items), items)
 	}
@@ -238,7 +238,7 @@ func TestWindowItemsUsageThenPace(t *testing.T) {
 }
 
 func TestWindowItemsWithoutResetHasNoPaceItem(t *testing.T) {
-	items := windowItems("W", "Week (all models)", usageWindow{usedPercent: 12}, weekWindow, testNow)
+	items := windowItems("W", "Week (all models)", Window{UsedPercent: 12}, WeekWindow, testNow)
 	if len(items) != 1 {
 		t.Fatalf("got %d items, want 1 (no reset time to pace against): %+v", len(items), items)
 	}

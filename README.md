@@ -9,8 +9,8 @@ access token Claude Code already stores in `~/.claude/.credentials.json`
 (`CLAUDE_CONFIG_DIR` is honored; the token is only read, never refreshed). If
 that fails, the optional "Claude Code session ID" setting enables a slower
 fallback that runs a headless `claude -p /usage` in that session. With neither
-a stored login nor a session ID the badge shows N/A. See `getUsage` in
-`usage.go` and `api.go`. The endpoint is undocumented and may change.
+a stored login nor a session ID the badge shows N/A. See `Fetch` in
+`internal/usage`. The endpoint is undocumented and may change.
 
 ## Per-session estimate
 
@@ -44,26 +44,18 @@ plugin from the TUI, the web dashboard, or `aoe plugin {enable,disable,update}`.
 ## Layout
 
 ```
-aoe-plugin.toml         the manifest (commands, settings, ui slots, runtime)
-go.mod                  module definition
-go.work                 links this module and magefiles/ for local tooling
-worker.go               the JSON-RPC worker loop
-poller.go               background refresh: status bar + per-session composer badges
-rpc.go                  message shapes + response builders
-worker_contract_test.go worker-contract and framing tests
-rpc_test.go             response-builder tests
-hostrpc.go              outbound host RPC calls (config.get) + inbound dispatch
-hostrpc_test.go         request/notification/reply routing tests
-api.go                  primary usage source: OAuth usage API + stored token
-api_test.go             usage-API client tests
-usage.go                badge rendering, pace/tone, `claude -p /usage` fallback
-usage_test.go           usage-parser and rendering tests
-transcripts.go          incremental transcript index + token weights
-transcripts_test.go     transcript index tests
-sessions.go             live AoE sessions and their Claude session ids
-sessions_test.go        session store tests
-poller_test.go          poller and composer-badge tests
-magefiles/              zero-install Mage build (see below)
+aoe-plugin.toml                          the manifest (commands, settings, ui slots, runtime)
+go.mod, go.work                          module definition; go.work links magefiles/ for local tooling
+cmd/usage-badge-worker/                  the worker binary: JSON-RPC loop + worker contract tests
+internal/host/                           the AoE host connection: JSON-RPC shapes, outbound
+                                         calls (config.get), inbound request/notification routing
+internal/usage/                          usage source and status-bar rendering:
+                                           api.go    OAuth usage API + stored token
+                                           usage.go  pace/tone/items, `claude -p /usage` fallback
+internal/attribution/                    per-session estimate: transcript index + token weights,
+                                         live AoE sessions and their Claude session ids
+internal/poller/                         background refresh: status bar + composer badges
+magefiles/                               zero-install Mage build (see below)
 ```
 
 ## Develop
@@ -87,7 +79,7 @@ Drive the worker by hand (it reads one JSON-RPC request per line on stdin):
 
 ```bash
 echo '{"jsonrpc":"2.0","id":1,"method":"usage-badge.status","params":{}}' \
-  | go run .
+  | go run ./cmd/usage-badge-worker
 ```
 ## Worker protocol
 

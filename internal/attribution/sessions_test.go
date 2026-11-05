@@ -1,4 +1,4 @@
-package main
+package attribution
 
 import (
 	"path/filepath"
@@ -19,13 +19,13 @@ func TestLoadLiveSessionsFiltersAndMergesProfiles(t *testing.T) {
   {"id": "live2", "acp_session_id": "t-live2"}
 ]`)
 
-	sessions, err := loadLiveSessions(dir)
+	sessions, err := LoadLiveSessions(dir)
 	if err != nil {
 		t.Fatalf("loadLiveSessions: %v", err)
 	}
 	var got []string
 	for _, s := range sessions {
-		got = append(got, s.id+"="+s.transcript)
+		got = append(got, s.ID+"="+s.Transcript)
 	}
 	sort.Strings(got)
 	want := []string{"live1=t-live1", "live2=t-live2"}
@@ -35,7 +35,7 @@ func TestLoadLiveSessionsFiltersAndMergesProfiles(t *testing.T) {
 }
 
 func TestLoadLiveSessionsNoProfiles(t *testing.T) {
-	sessions, err := loadLiveSessions(t.TempDir())
+	sessions, err := LoadLiveSessions(t.TempDir())
 	if err != nil || len(sessions) != 0 {
 		t.Errorf("sessions = %v, err = %v; want none and no error", sessions, err)
 	}
@@ -44,7 +44,7 @@ func TestLoadLiveSessionsNoProfiles(t *testing.T) {
 func TestLoadLiveSessionsMalformedStoreIsError(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "profiles", "main", "sessions.json"), `{not json`)
-	if _, err := loadLiveSessions(dir); err == nil {
+	if _, err := LoadLiveSessions(dir); err == nil {
 		t.Error("err = nil, want a parse error")
 	}
 }

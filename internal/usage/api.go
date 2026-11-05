@@ -4,7 +4,7 @@
 // slower `claude -p /usage` path (see getUsage). The token is only ever
 // read, never refreshed: refresh tokens rotate, and refreshing here could
 // invalidate the one the real CLI holds.
-package main
+package usage
 
 import (
 	"context"
@@ -40,8 +40,8 @@ type credentialsFile struct {
 	} `json:"claudeAiOauth"`
 }
 
-// claudeConfigDir honors CLAUDE_CONFIG_DIR like the CLI does.
-func claudeConfigDir() (string, error) {
+// ClaudeConfigDir honors CLAUDE_CONFIG_DIR like the CLI does.
+func ClaudeConfigDir() (string, error) {
 	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
 		return dir, nil
 	}
@@ -53,7 +53,7 @@ func claudeConfigDir() (string, error) {
 }
 
 func credentialsPath() (string, error) {
-	dir, err := claudeConfigDir()
+	dir, err := ClaudeConfigDir()
 	if err != nil {
 		return "", err
 	}
@@ -116,11 +116,11 @@ type apiUsage struct {
 	SevenDay *apiWindow `json:"seven_day"`
 }
 
-func (w *apiWindow) toUsageWindow() usageWindow {
-	out := usageWindow{usedPercent: int(math.Round(w.Utilization))}
+func (w *apiWindow) toUsageWindow() Window {
+	out := Window{UsedPercent: int(math.Round(w.Utilization))}
 	if t, err := time.Parse(time.RFC3339Nano, w.ResetsAt); err == nil {
-		out.resetsAt = t.Local()
-		out.hasReset = true
+		out.ResetsAt = t.Local()
+		out.HasReset = true
 	}
 	return out
 }
@@ -128,13 +128,13 @@ func (w *apiWindow) toUsageWindow() usageWindow {
 // fetchUsageAPI asks the usage endpoint for the session (five_hour) and
 // week (seven_day) windows. weekOK is false when the response has no
 // seven_day window.
-func fetchUsageAPI(ctx context.Context, url, token, userAgent string) (session, week usageWindow, weekOK bool, err error) {
+func fetchUsageAPI(ctx context.Context, url, token, userAgent string) (session, week Window, weekOK bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, usageAPITimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return usageWindow{}, usageWindow{}, false, err
+		return Window{}, Window{}, false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
@@ -142,23 +142,23 @@ func fetchUsageAPI(ctx context.Context, url, token, userAgent string) (session, 
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return usageWindow{}, usageWindow{}, false, fmt.Errorf("usage API: %w", err)
+		return Window{}, Window{}, false, fmt.Errorf("usage API: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return usageWindow{}, usageWindow{}, false, errUsageRateLimited
+		return Window{}, Window{}, false, errUsageRateLimited
 	case resp.StatusCode != http.StatusOK:
-		return usageWindow{}, usageWindow{}, false, fmt.Errorf("usage API: HTTP %d", resp.StatusCode)
+		return Window{}, Window{}, false, fmt.Errorf("usage API: HTTP %d", resp.StatusCode)
 	}
 
 	var usage apiUsage
 	if err := json.NewDecoder(resp.Body).Decode(&usage); err != nil {
-		return usageWindow{}, usageWindow{}, false, fmt.Errorf("usage API: decode: %w", err)
+		return Window{}, Window{}, false, fmt.Errorf("usage API: decode: %w", err)
 	}
 	if usage.FiveHour == nil {
-		return usageWindow{}, usageWindow{}, false, errors.New("usage API: response has no five_hour window")
+		return Window{}, Window{}, false, errors.New("usage API: response has no five_hour window")
 	}
 	session = usage.FiveHour.toUsageWindow()
 	if usage.SevenDay != nil {
@@ -168,18 +168,18 @@ func fetchUsageAPI(ctx context.Context, url, token, userAgent string) (session, 
 }
 
 // usageFromAPI is the full primary path: credentials, user agent, request.
-func usageFromAPI(ctx context.Context, now time.Time) (session, week usageWindow, weekOK bool, err error) {
+func usageFromAPI(ctx context.Context, now time.Time) (session, week Window, weekOK bool, err error) {
 	path, err := credentialsPath()
 	if err != nil {
-		return usageWindow{}, usageWindow{}, false, err
+		return Window{}, Window{}, false, err
 	}
 	token, err := readAccessToken(path, now)
 	if err != nil {
-		return usageWindow{}, usageWindow{}, false, err
+		return Window{}, Window{}, false, err
 	}
 	version := claudeVersion(ctx)
 	if version == "" {
-		return usageWindow{}, usageWindow{}, false, errors.New("could not determine the installed claude version")
+		return Window{}, Window{}, false, errors.New("could not determine the installed claude version")
 	}
 	return fetchUsageAPI(ctx, usageAPIURL, token, "claude-code/"+version)
 }

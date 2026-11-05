@@ -82,5 +82,5 @@ kind = "command"
 command = [".aoe-build/usage-badge-worker"]
 
 [[runtime.build]]
-command = ["go", "build", "-o", ".aoe-build/usage-badge-worker", "."]
+command = ["go", "build", "-o", ".aoe-build/usage-badge-worker", "./cmd/usage-badge-worker"]
 platforms = ["linux", "macos"]

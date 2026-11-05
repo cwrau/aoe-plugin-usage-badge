@@ -1,15 +1,45 @@
-package main
+package poller
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cwrau/aoe-plugin-usage-badge/internal/attribution"
+	"github.com/cwrau/aoe-plugin-usage-badge/internal/host"
+	"github.com/cwrau/aoe-plugin-usage-badge/internal/usage"
 )
+
+// errorResult is what a failed fetch looks like to the poller: an "err"
+// payload and no usage windows.
+func errorResult(message string, keepLast bool) usage.Result {
+	return usage.Result{
+		Payload:  map[string]any{"text": "err", "tooltip": message},
+		KeepLast: keepLast,
+	}
+}
+
+// writeTranscript writes one assistant message (output tokens only, so its
+// weight is exactly out) as a Claude Code transcript line.
+func writeTranscript(t *testing.T, path, messageID string, at time.Time, out int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := fmt.Sprintf(
+		`{"type":"assistant","timestamp":%q,"message":{"id":%q,"model":"claude-sonnet-5-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":%d}}}`+"\n",
+		at.UTC().Format(time.RFC3339Nano), messageID, out)
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 type pushed struct {
 	method    string
@@ -56,28 +86,31 @@ func composerPushes(all []pushed) []pushed {
 // testPoller wires a poller to a buffer, a fake fetch and a temp transcript
 // root: 20% of the 5h session used, 40% of the week, both opened an hour or
 // more ago.
-func testPoller(t *testing.T) (*usagePoller, *bytes.Buffer, string) {
+func testPoller(t *testing.T) (*Poller, *bytes.Buffer, string) {
 	t.Helper()
 	var out bytes.Buffer
 	var wg sync.WaitGroup
-	rpc := newHostRPC(&out)
-	p := newUsagePoller(rpc, &wg)
+	rpc := host.NewClient(&out)
+	p := New(rpc, &wg)
 
 	now := time.Now()
-	res := usageFromWindows(
-		usageWindow{usedPercent: 20, resetsAt: now.Add(2 * time.Hour), hasReset: true},
-		usageWindow{usedPercent: 40, resetsAt: now.Add(3 * 24 * time.Hour), hasReset: true},
-		true, now)
-	p.fetch = func(context.Context) usageResult { return res }
+	res := usage.Result{
+		Payload:     map[string]any{"text": "S 20%"},
+		Session:     usage.Window{UsedPercent: 20, ResetsAt: now.Add(2 * time.Hour), HasReset: true},
+		Week:        usage.Window{UsedPercent: 40, ResetsAt: now.Add(3 * 24 * time.Hour), HasReset: true},
+		WeekOK:      true,
+		HaveWindows: true,
+	}
+	p.fetch = func(context.Context) usage.Result { return res }
 
 	root := t.TempDir()
-	p.index = newTranscriptIndex(root)
-	p.loadSessions = func() ([]aoeSession, error) {
-		return []aoeSession{{id: "a1", transcript: "t1"}, {id: "a2", transcript: "t2"}}, nil
+	p.index = attribution.NewIndex(root)
+	p.loadSessions = func() ([]attribution.Session, error) {
+		return []attribution.Session{{ID: "a1", Transcript: "t1"}, {ID: "a2", Transcript: "t2"}}, nil
 	}
 	recent := now.Add(-30 * time.Minute)
-	writeFile(t, filepath.Join(root, "proj", "t1.jsonl"), usageLine("m1", recent, 0, 0, 0, 300))
-	writeFile(t, filepath.Join(root, "proj", "t2.jsonl"), usageLine("m2", recent, 0, 0, 0, 100))
+	writeTranscript(t, filepath.Join(root, "proj", "t1.jsonl"), "m1", recent, 300)
+	writeTranscript(t, filepath.Join(root, "proj", "t2.jsonl"), "m2", recent, 100)
 	return p, &out, root
 }
 
@@ -89,7 +122,7 @@ func TestRefreshPushesStatusAndPerSessionComposerBadges(t *testing.T) {
 	pushes := parsePushes(t, out)
 	var status []pushed
 	for _, push := range pushes {
-		if push.slot == uiSlot {
+		if push.slot == statusSlot {
 			status = append(status, push)
 		}
 	}
@@ -123,7 +156,7 @@ func TestClickCyclesBetweenSessionAndWeeklyShare(t *testing.T) {
 	out.Reset()
 
 	click := json.RawMessage(`{"session_id":"a1"}`)
-	p.handleNotification(composerCycleMethod, click)
+	p.HandleNotification(composerCycleMethod, click)
 	got := composerPushes(parsePushes(t, out))
 	if len(got) != 1 || got[0].sessionID != "a1" {
 		t.Fatalf("pushes = %+v, want exactly one for a1", got)
@@ -134,7 +167,7 @@ func TestClickCyclesBetweenSessionAndWeeklyShare(t *testing.T) {
 	}
 
 	out.Reset()
-	p.handleNotification(composerCycleMethod, click)
+	p.HandleNotification(composerCycleMethod, click)
 	got = composerPushes(parsePushes(t, out))
 	if len(got) != 1 || got[0].payload["label"] != "S ~15%" {
 		t.Errorf("pushes = %+v, want a second click to wrap back to 'S ~15%%'", got)
@@ -146,9 +179,9 @@ func TestClickIgnoresUnknownSessionsAndMethods(t *testing.T) {
 	p.refresh(context.Background())
 	out.Reset()
 
-	p.handleNotification(composerCycleMethod, json.RawMessage(`{"session_id":"nope"}`))
-	p.handleNotification("something.else", json.RawMessage(`{"session_id":"a1"}`))
-	p.handleNotification(composerCycleMethod, json.RawMessage(`not json`))
+	p.HandleNotification(composerCycleMethod, json.RawMessage(`{"session_id":"nope"}`))
+	p.HandleNotification("something.else", json.RawMessage(`{"session_id":"a1"}`))
+	p.HandleNotification(composerCycleMethod, json.RawMessage(`not json`))
 
 	if out.Len() != 0 {
 		t.Errorf("pushed %q, want nothing", out.String())
@@ -172,8 +205,8 @@ func TestRefreshRemovesBadgesOfSessionsThatAreGone(t *testing.T) {
 	p.refresh(context.Background())
 	out.Reset()
 
-	p.loadSessions = func() ([]aoeSession, error) {
-		return []aoeSession{{id: "a1", transcript: "t1"}}, nil
+	p.loadSessions = func() ([]attribution.Session, error) {
+		return []attribution.Session{{ID: "a1", Transcript: "t1"}}, nil
 	}
 	p.refresh(context.Background())
 
@@ -190,9 +223,7 @@ func TestRefreshRemovesBadgesOfSessionsThatAreGone(t *testing.T) {
 
 func TestRefreshWithoutWindowsLeavesComposerBadgesAlone(t *testing.T) {
 	p, out, _ := testPoller(t)
-	p.fetch = func(context.Context) usageResult {
-		return usageResult{payload: errorPayload("boom")}
-	}
+	p.fetch = func(context.Context) usage.Result { return errorResult("boom", false) }
 
 	p.refresh(context.Background())
 
@@ -206,9 +237,7 @@ func TestRateLimitedFetchKeepsLastStatusOnceOneWasShown(t *testing.T) {
 	p.refresh(context.Background()) // a real payload is now displayed
 	out.Reset()
 
-	p.fetch = func(context.Context) usageResult {
-		return usageResult{payload: errorPayload("rate limited"), keepLast: true}
-	}
+	p.fetch = func(context.Context) usage.Result { return errorResult("rate limited", true) }
 	p.refresh(context.Background())
 
 	if out.Len() != 0 {
@@ -218,9 +247,7 @@ func TestRateLimitedFetchKeepsLastStatusOnceOneWasShown(t *testing.T) {
 
 func TestRateLimitedFirstFetchStillShowsTheError(t *testing.T) {
 	p, out, _ := testPoller(t)
-	p.fetch = func(context.Context) usageResult {
-		return usageResult{payload: errorPayload("rate limited"), keepLast: true}
-	}
+	p.fetch = func(context.Context) usage.Result { return errorResult("rate limited", true) }
 
 	p.refresh(context.Background())
 

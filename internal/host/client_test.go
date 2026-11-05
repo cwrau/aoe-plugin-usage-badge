@@ -1,4 +1,4 @@
-package main
+package host
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 
 func TestHandleInboundLineRoutesRequestsNotificationsAndReplies(t *testing.T) {
 	var out bytes.Buffer
-	rpc := newHostRPC(&out)
+	rpc := NewClient(&out)
 
 	var dispatched, notified []string
 	dispatch := func(method string, _ json.RawMessage) (any, error) {
@@ -21,8 +21,8 @@ func TestHandleInboundLineRoutesRequestsNotificationsAndReplies(t *testing.T) {
 		notified = append(notified, method)
 	}
 
-	rpc.handleInboundLine([]byte(`{"jsonrpc":"2.0","id":7,"method":"x.status"}`), dispatch, onNotification)
-	rpc.handleInboundLine([]byte(`{"jsonrpc":"2.0","method":"usage.cycle","params":{"session_id":"s"}}`), dispatch, onNotification)
+	rpc.HandleInboundLine([]byte(`{"jsonrpc":"2.0","id":7,"method":"x.status"}`), dispatch, onNotification)
+	rpc.HandleInboundLine([]byte(`{"jsonrpc":"2.0","method":"usage.cycle","params":{"session_id":"s"}}`), dispatch, onNotification)
 
 	if len(dispatched) != 1 || dispatched[0] != "x.status" {
 		t.Errorf("dispatched = %v, want [x.status]", dispatched)
@@ -37,7 +37,7 @@ func TestHandleInboundLineRoutesRequestsNotificationsAndReplies(t *testing.T) {
 
 func TestCallReceivesItsReplyThroughHandleInboundLine(t *testing.T) {
 	var out bytes.Buffer
-	rpc := newHostRPC(&out)
+	rpc := NewClient(&out)
 	noop := func(string, json.RawMessage) {}
 
 	type result struct {
@@ -46,7 +46,7 @@ func TestCallReceivesItsReplyThroughHandleInboundLine(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		raw, err := rpc.call(context.Background(), "config.get", map[string]any{"key": "k"})
+		raw, err := rpc.Call(context.Background(), "config.get", map[string]any{"key": "k"})
 		done <- result{raw, err}
 	}()
 
@@ -76,7 +76,7 @@ func TestCallReceivesItsReplyThroughHandleInboundLine(t *testing.T) {
 		t.Fatalf("request not JSON: %v", err)
 	}
 	reply, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"value": "v"}})
-	rpc.handleInboundLine(reply, nil, noop)
+	rpc.HandleInboundLine(reply, nil, noop)
 
 	select {
 	case r := <-done:

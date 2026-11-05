@@ -1,8 +1,10 @@
-// Status-bar rendering of the usage windows (pace, tone, cycling items) and
-// the fallback usage source: a headless `claude -p /usage`, resumed against
-// the session id the user configures as a plugin setting. Same technique as
-// the systemd agent-limit.service scraper this plugin is modeled on.
-package main
+// Package usage fetches Claude Code's subscription usage limits and renders
+// them for the status bar (pace, tone, cycling items). The primary source is
+// the OAuth usage API (api.go); the fallback is a headless `claude -p /usage`,
+// resumed against a session id the user configures as a plugin setting. Same
+// technique as the systemd agent-limit.service scraper this plugin is modeled
+// on.
+package usage
 
 import (
 	"context"
@@ -17,9 +19,6 @@ import (
 )
 
 const (
-	sessionIDSettingKey = "session_id"
-	configFetchTimeout  = 1 * time.Second
-
 	// usageBadgeGroup is the shared `group` that makes the host collapse the
 	// per-window badge items into one chip that cycles on click/tap.
 	usageBadgeGroup = "usage"
@@ -36,8 +35,8 @@ const (
 	// by Anthropic -- /usage reports only the reset time, not the window
 	// length, so these are hardcoded to derive a window's start (and thus
 	// how far into it "now" is) from resetsAt.
-	sessionWindow = 5 * time.Hour
-	weekWindow    = 7 * 24 * time.Hour
+	SessionWindow = 5 * time.Hour
+	WeekWindow    = 7 * 24 * time.Hour
 
 	// paceDangerThreshold is how many percentage points of usage ahead of
 	// ideal pace (see idealPercent) tips the badge from "warn" to "danger".
@@ -51,7 +50,7 @@ const (
 type tone string
 
 const (
-	toneNeutral tone = "neutral"
+	ToneNeutral tone = "neutral"
 	toneSuccess tone = "success"
 	toneWarn    tone = "warn"
 	toneDanger  tone = "danger"
@@ -65,73 +64,77 @@ var (
 	resetTimeRe = regexp.MustCompile(`^(.+?)\s*\(([^()]+)\)$`)
 )
 
-type usageWindow struct {
-	usedPercent int
-	resetsAt    time.Time
-	hasReset    bool
+// Window is one limit window (the 5h session or the week) as reported by
+// Claude Code: how much of it is used and when it resets.
+type Window struct {
+	UsedPercent int
+	ResetsAt    time.Time
+	HasReset    bool
 }
 
 func errorPayload(message string) map[string]any {
 	return map[string]any{"text": "err", "tooltip": message, "tone": string(toneWarn)}
 }
 
-// usageResult is one fetch's outcome: the status-bar payload to show, plus
+// Result is one fetch's outcome: the status-bar payload to show, plus
 // the parsed windows (when there are any) that the per-session composer
 // badges are derived from.
-type usageResult struct {
-	payload map[string]any
-	// keepLast is true when there's nothing better to show than whatever was
+type Result struct {
+	Payload map[string]any
+	// KeepLast is true when there's nothing better to show than whatever was
 	// displayed before: a rate-limited API with no fallback configured.
-	keepLast    bool
-	session     usageWindow
-	week        usageWindow
-	weekOK      bool
-	haveWindows bool
+	KeepLast    bool
+	Session     Window
+	Week        Window
+	WeekOK      bool
+	HaveWindows bool
 }
 
 // usageFromWindows renders the two windows as cycling badge items. The reset
 // time is put inline in each item's "text" (not just "tooltip") since
 // mobile has no hover to reveal a tooltip.
-func usageFromWindows(session, week usageWindow, weekOK bool, now time.Time) usageResult {
-	items := windowItems("S", "Session", session, sessionWindow, now)
+func usageFromWindows(session, week Window, weekOK bool, now time.Time) Result {
+	items := windowItems("S", "Session", session, SessionWindow, now)
 	if weekOK {
-		items = append(items, windowItems("W", "Week (all models)", week, weekWindow, now)...)
+		items = append(items, windowItems("W", "Week (all models)", week, WeekWindow, now)...)
 	}
-	return usageResult{
-		payload:     map[string]any{"items": items},
-		session:     session,
-		week:        week,
-		weekOK:      weekOK,
-		haveWindows: true,
+	return Result{
+		Payload:     map[string]any{"items": items},
+		Session:     session,
+		Week:        week,
+		WeekOK:      weekOK,
+		HaveWindows: true,
 	}
 }
 
-// getUsage fetches usage and renders the status-bar payload. The OAuth usage
+// Fetch fetches usage and renders the status-bar payload. The OAuth usage
 // API is tried first; when it can't answer (no credentials, expired token,
-// rate limit, any other failure) the optional session-id setting enables the
-// slower `claude -p /usage` fallback.
-func getUsage(ctx context.Context, rpc *hostRPC) usageResult {
+// rate limit, any other failure) the session id returned by
+// fallbackSessionID, if any, enables the slower `claude -p /usage` fallback.
+// It is only called when the fallback is actually needed.
+func Fetch(ctx context.Context, fallbackSessionID func(context.Context) string) Result {
 	now := time.Now()
 	session, week, weekOK, apiErr := usageFromAPI(ctx, now)
 	if apiErr == nil {
 		return usageFromWindows(session, week, weekOK, now)
 	}
 
-	settingCtx, cancel := context.WithTimeout(ctx, configFetchTimeout)
-	sessionID := rpc.getStringSetting(settingCtx, sessionIDSettingKey, "")
-	cancel()
+	sessionID := ""
+	if fallbackSessionID != nil {
+		sessionID = fallbackSessionID(ctx)
+	}
 	if sessionID == "" {
 		switch {
 		case errors.Is(apiErr, errNoCredentials):
-			return usageResult{payload: map[string]any{
+			return Result{Payload: map[string]any{
 				"text":    "N/A",
 				"tooltip": `Sign in to Claude Code on this machine, or set the "Claude Code session ID" plugin setting, to enable usage tracking.`,
-				"tone":    string(toneNeutral),
+				"tone":    string(ToneNeutral),
 			}}
 		case errors.Is(apiErr, errUsageRateLimited):
-			return usageResult{payload: errorPayload(apiErr.Error()), keepLast: true}
+			return Result{Payload: errorPayload(apiErr.Error()), KeepLast: true}
 		default:
-			return usageResult{payload: errorPayload(apiErr.Error())}
+			return Result{Payload: errorPayload(apiErr.Error())}
 		}
 	}
 
@@ -140,17 +143,17 @@ func getUsage(ctx context.Context, rpc *hostRPC) usageResult {
 
 // usageFromCLI is the fallback path: a headless `claude -p /usage` resumed
 // against the configured session.
-func usageFromCLI(ctx context.Context, sessionID string, now time.Time) usageResult {
+func usageFromCLI(ctx context.Context, sessionID string, now time.Time) Result {
 	cmdCtx, cancel := context.WithTimeout(ctx, usageCommandTimeout)
 	defer cancel()
 	output, err := runClaudeUsage(cmdCtx, sessionID)
 	if err != nil {
-		return usageResult{payload: errorPayload(err.Error())}
+		return Result{Payload: errorPayload(err.Error())}
 	}
 
 	session, ok := parseUsageWindow(output, sessionLineRe, now)
 	if !ok {
-		return usageResult{payload: errorPayload("could not parse `claude -p /usage` output")}
+		return Result{Payload: errorPayload("could not parse `claude -p /usage` output")}
 	}
 	week, weekOK := parseUsageWindow(output, weekLineRe, now)
 	return usageFromWindows(session, week, weekOK, now)
@@ -161,16 +164,16 @@ func usageFromCLI(ctx context.Context, sessionID string, now time.Time) usageRes
 // item. All items share usageBadgeGroup, so the host collapses them into a
 // single chip that cycles on tap. Each item carries the window's pace tone:
 // a chip's color must match the window it displays.
-func windowItems(label, tooltipName string, w usageWindow, window time.Duration, now time.Time) []map[string]any {
-	ideal, hasIdeal := idealPercent(w.resetsAt, now, window)
-	itemTone := string(paceTone(w.usedPercent, ideal, hasIdeal))
+func windowItems(label, tooltipName string, w Window, window time.Duration, now time.Time) []map[string]any {
+	ideal, hasIdeal := idealPercent(w.ResetsAt, now, window)
+	itemTone := string(paceTone(w.UsedPercent, ideal, hasIdeal))
 
-	text := fmt.Sprintf("%s %d%%", label, w.usedPercent)
-	tooltip := fmt.Sprintf("%s: %d%% used", tooltipName, w.usedPercent)
-	if w.hasReset {
-		remaining := formatDuration(w.resetsAt.Sub(now))
+	text := fmt.Sprintf("%s %d%%", label, w.UsedPercent)
+	tooltip := fmt.Sprintf("%s: %d%% used", tooltipName, w.UsedPercent)
+	if w.HasReset {
+		remaining := formatDuration(w.ResetsAt.Sub(now))
 		text += " · " + remaining
-		tooltip += fmt.Sprintf(", resets in %s (%s)", remaining, w.resetsAt.Format("Jan 2, 15:04 MST"))
+		tooltip += fmt.Sprintf(", resets in %s (%s)", remaining, w.ResetsAt.Format("Jan 2, 15:04 MST"))
 	}
 	items := []map[string]any{{
 		"text":    text,
@@ -179,10 +182,10 @@ func windowItems(label, tooltipName string, w usageWindow, window time.Duration,
 		"group":   usageBadgeGroup,
 	}}
 
-	if pace := paceShort(w.usedPercent, ideal, hasIdeal, window); pace != "" {
+	if pace := paceShort(w.UsedPercent, ideal, hasIdeal, window); pace != "" {
 		items = append(items, map[string]any{
 			"text":    label + " " + pace,
-			"tooltip": tooltipName + ": " + paceLabel(w.usedPercent, ideal, hasIdeal, window),
+			"tooltip": tooltipName + ": " + paceLabel(w.UsedPercent, ideal, hasIdeal, window),
 			"tone":    itemTone,
 			"group":   usageBadgeGroup,
 		})
@@ -296,7 +299,7 @@ func runClaudeUsage(ctx context.Context, sessionID string) (string, error) {
 	return string(out), nil
 }
 
-func parseUsageWindow(output string, re *regexp.Regexp, now time.Time) (usageWindow, bool) {
+func parseUsageWindow(output string, re *regexp.Regexp, now time.Time) (Window, bool) {
 	for line := range strings.SplitSeq(output, "\n") {
 		m := re.FindStringSubmatch(strings.TrimSpace(line))
 		if m == nil {
@@ -306,16 +309,16 @@ func parseUsageWindow(output string, re *regexp.Regexp, now time.Time) (usageWin
 		if err != nil {
 			continue
 		}
-		w := usageWindow{usedPercent: percent}
+		w := Window{UsedPercent: percent}
 		if resetsText := strings.TrimSpace(m[2]); resetsText != "" {
 			if t, ok := parseResetTime(resetsText, now); ok {
-				w.resetsAt = t
-				w.hasReset = true
+				w.ResetsAt = t
+				w.HasReset = true
 			}
 		}
 		return w, true
 	}
-	return usageWindow{}, false
+	return Window{}, false
 }
 
 // parseResetTime parses the CLI's "Sep 23, 6:39pm (Europe/Berlin)" format.

@@ -1,4 +1,5 @@
-// Agent of Empires worker: JSON-RPC 2.0 over newline-delimited JSON on stdio.
+// Command usage-badge-worker is the Agent of Empires worker: JSON-RPC 2.0 over
+// newline-delimited JSON on stdio.
 //
 // The host spawns this process, sends one JSON-RPC request per line on
 // stdin, and reads one response per line on stdout. The worker exits
@@ -13,18 +14,12 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
+
+	"github.com/cwrau/aoe-plugin-usage-badge/internal/host"
+	"github.com/cwrau/aoe-plugin-usage-badge/internal/poller"
 )
 
 const runtimeName = "go"
-
-// StatusBar is a global slot (no session_id). Must match aoe-plugin.toml's [[ui]].
-const (
-	uiSlot = "status-bar"
-	uiID   = "usage-badge"
-)
-
-const pollInterval = 60 * time.Second
 
 // handle maps a command id to a method; dispatch on the trailing segment so
 // the worker is robust to the host's exact method prefix. A real handler
@@ -39,18 +34,18 @@ func handle(method string, _ json.RawMessage) (any, error) {
 			"message": "Usage Badge worker is running",
 		}, nil
 	}
-	return nil, &methodNotFoundError{method: method}
+	return nil, &host.MethodNotFoundError{Method: method}
 }
 
 func main() {
 	ctx := context.Background()
-	rpc := newHostRPC(os.Stdout)
+	rpc := host.NewClient(os.Stdout)
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
-	poller := newUsagePoller(rpc, &wg)
+	badge := poller.New(rpc, &wg)
 	wg.Go(func() {
-		poller.run(ctx, stop)
+		badge.Run(ctx, stop)
 	})
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -59,7 +54,7 @@ func main() {
 		if line == "" {
 			continue
 		}
-		rpc.handleInboundLine([]byte(line), handle, poller.handleNotification)
+		rpc.HandleInboundLine([]byte(line), handle, badge.HandleNotification)
 	}
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintln(os.Stderr, "usage-badge-worker: reading stdin:", err)

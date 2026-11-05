@@ -1,10 +1,4 @@
-// Outbound JSON-RPC calls from worker to host, layered on the same ndjson
-// stdio channel the host uses to send this worker requests. handleInboundLine
-// is the single entry point for every stdin line: it demuxes replies to our
-// own outbound calls (config.get) from genuine host->worker requests
-// (handed to the caller-supplied dispatch func) and notifications (handed
-// to the caller-supplied onNotification func).
-package main
+package host
 
 import (
 	"context"
@@ -14,7 +8,14 @@ import (
 	"sync"
 )
 
-type hostRPC struct {
+// Client is the worker's end of the host connection: outbound calls and
+// notifications to the host, layered on the same ndjson stdio channel the
+// host uses to send this worker requests. HandleInboundLine is the single
+// entry point for every stdin line: it demuxes replies to our own outbound
+// calls (config.get) from genuine host->worker requests (handed to the
+// caller-supplied dispatch func) and notifications (handed to the
+// caller-supplied onNotification func).
+type Client struct {
 	mu      sync.Mutex
 	out     io.Writer
 	nextID  int
@@ -38,13 +39,13 @@ type inboundLine struct {
 	Error  *rpcErrorBody   `json:"error"`
 }
 
-// newHostRPC's id counter starts in a high range so it never collides with
+// NewClient's id counter starts in a high range so it never collides with
 // the ids the host assigns to its own requests to this worker.
-func newHostRPC(out io.Writer) *hostRPC {
-	return &hostRPC{out: out, nextID: 1_000_000, pending: make(map[int]chan rpcReply)}
+func NewClient(out io.Writer) *Client {
+	return &Client{out: out, nextID: 1_000_000, pending: make(map[int]chan rpcReply)}
 }
 
-func (h *hostRPC) writeMessage(v any) {
+func (h *Client) writeMessage(v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return
@@ -55,16 +56,21 @@ func (h *hostRPC) writeMessage(v any) {
 	_, _ = h.out.Write(data)
 }
 
-func (h *hostRPC) allocID() int {
+// Notify sends a fire-and-forget notification to the host, e.g. ui.state.set.
+func (h *Client) Notify(method string, params any) {
+	h.writeMessage(newNotification(method, params))
+}
+
+func (h *Client) allocID() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.nextID++
 	return h.nextID
 }
 
-// call sends a request and blocks until handleInboundLine delivers the
+// Call sends a request and blocks until handleInboundLine delivers the
 // matching reply or ctx is done, whichever comes first.
-func (h *hostRPC) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+func (h *Client) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	id := h.allocID()
 	ch := make(chan rpcReply, 1)
 	h.mu.Lock()
@@ -89,11 +95,11 @@ func (h *hostRPC) call(ctx context.Context, method string, params any) (json.Raw
 	}
 }
 
-// handleInboundLine processes one stdin line. dispatch answers a genuine
+// HandleInboundLine processes one stdin line. dispatch answers a genuine
 // host->worker request, same as the top-level scanner loop did before the
 // worker needed to make outbound calls of its own; onNotification receives
 // the host's fire-and-forget notifications (e.g. a composer button click).
-func (h *hostRPC) handleInboundLine(
+func (h *Client) HandleInboundLine(
 	line []byte,
 	dispatch func(method string, params json.RawMessage) (any, error),
 	onNotification func(method string, params json.RawMessage),
@@ -133,12 +139,12 @@ func (h *hostRPC) handleInboundLine(
 	ch <- rpcReply{result: in.Result, err: in.Error}
 }
 
-// getStringSetting reads one of this plugin's own settings via config.get,
+// GetStringSetting reads one of this plugin's own settings via config.get,
 // returning fallback on any failure (host error, cancelled/expired ctx, or a
 // missing/non-string value) -- the usage badge must never block or crash
 // over a settings read, it just falls back to its unconfigured state.
-func (h *hostRPC) getStringSetting(ctx context.Context, key, fallback string) string {
-	result, err := h.call(ctx, "config.get", map[string]any{"key": key})
+func (h *Client) GetStringSetting(ctx context.Context, key, fallback string) string {
+	result, err := h.Call(ctx, "config.get", map[string]any{"key": key})
 	if err != nil {
 		return fallback
 	}

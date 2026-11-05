@@ -1,4 +1,4 @@
-package main
+package usage
 
 import (
 	"context"
@@ -45,14 +45,14 @@ func TestFetchUsageAPIParsesWindows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchUsageAPI: %v", err)
 	}
-	if session.usedPercent != 18 {
-		t.Errorf("session usedPercent = %d, want 18 (18.4 rounded)", session.usedPercent)
+	if session.UsedPercent != 18 {
+		t.Errorf("session usedPercent = %d, want 18 (18.4 rounded)", session.UsedPercent)
 	}
 	wantReset := time.Date(2026, 10, 20, 13, 19, 59, 863457000, time.UTC)
-	if !session.hasReset || !session.resetsAt.Equal(wantReset) {
-		t.Errorf("session resetsAt = %v (hasReset %v), want %v", session.resetsAt, session.hasReset, wantReset)
+	if !session.HasReset || !session.ResetsAt.Equal(wantReset) {
+		t.Errorf("session resetsAt = %v (hasReset %v), want %v", session.ResetsAt, session.HasReset, wantReset)
 	}
-	if !weekOK || week.usedPercent != 2 {
+	if !weekOK || week.UsedPercent != 2 {
 		t.Errorf("week = %+v (ok %v), want usedPercent 2", week, weekOK)
 	}
 }

@@ -1,8 +1,8 @@
-// JSON-RPC 2.0 message shapes and response builders.
-//
-// A methodNotFoundError becomes -32601; anything else is the internal-error
-// code -32603.
-package main
+// Package host is the worker's side of the Agent of Empires plugin protocol:
+// JSON-RPC 2.0 over newline-delimited JSON on stdio. rpc.go has the message
+// shapes and response builders (a MethodNotFoundError becomes -32601, anything
+// else the internal-error code -32603); client.go the connection itself.
+package host
 
 import "encoding/json"
 
@@ -31,12 +31,14 @@ type notification struct {
 	Params  any    `json:"params"`
 }
 
-type methodNotFoundError struct {
-	method string
+// MethodNotFoundError is the error a dispatch func returns for a method it
+// doesn't implement.
+type MethodNotFoundError struct {
+	Method string
 }
 
-func (e *methodNotFoundError) Error() string {
-	return "unknown method " + e.method
+func (e *MethodNotFoundError) Error() string {
+	return "unknown method " + e.Method
 }
 
 func resultResponse(id json.RawMessage, result any) response {
@@ -44,11 +46,11 @@ func resultResponse(id json.RawMessage, result any) response {
 }
 
 func errorResponse(id json.RawMessage, err error) response {
-	if mnf, ok := err.(*methodNotFoundError); ok {
+	if mnf, ok := err.(*MethodNotFoundError); ok {
 		return response{
 			JSONRPC: "2.0",
 			ID:      id,
-			Error:   &rpcErrorBody{Code: errMethodNotFound, Message: "unknown method " + mnf.method},
+			Error:   &rpcErrorBody{Code: errMethodNotFound, Message: "unknown method " + mnf.Method},
 		}
 	}
 	return response{

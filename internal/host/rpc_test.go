@@ -1,4 +1,4 @@
-package main
+package host
 
 import (
 	"encoding/json"
@@ -19,7 +19,7 @@ func TestResultResponseShape(t *testing.T) {
 }
 
 func TestMethodNotFoundMapsTo32601(t *testing.T) {
-	resp := errorResponse(json.RawMessage("5"), &methodNotFoundError{method: "x.y"})
+	resp := errorResponse(json.RawMessage("5"), &MethodNotFoundError{Method: "x.y"})
 	if resp.Error.Code != errMethodNotFound {
 		t.Errorf("got code %d, want %d", resp.Error.Code, errMethodNotFound)
 	}

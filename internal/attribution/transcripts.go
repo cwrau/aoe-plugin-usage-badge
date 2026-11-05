@@ -1,10 +1,12 @@
-// Per-session usage attribution. Anthropic exposes only the account-wide
-// limit utilization, so a session's share is estimated from the token usage
-// Claude Code records in its local transcripts: a session's share of a window
-// is the utilization times the session's weighted tokens over all local
-// weighted tokens in that window. Dividing by the local total keeps the
-// estimate self-calibrating, so no absolute %-per-token constant can rot.
-package main
+// Package attribution estimates each session's share of the usage limits.
+// Anthropic exposes only the account-wide limit utilization, so a session's
+// share is estimated from the token usage Claude Code records in its local
+// transcripts (transcripts.go): a session's share of a window is the
+// utilization times the session's weighted tokens over all local weighted
+// tokens in that window. Dividing by the local total keeps the estimate
+// self-calibrating, so no absolute %-per-token constant can rot. sessions.go
+// maps AoE sessions to the Claude sessions the transcripts are named after.
+package attribution
 
 import (
 	"bufio"
@@ -77,17 +79,17 @@ type fileState struct {
 	offset int64
 }
 
-// transcriptIndex incrementally indexes the usage in Claude Code's JSONL
+// Index incrementally indexes the usage in Claude Code's JSONL
 // transcripts. Files are append-only, so each refresh only reads what was
 // added since the previous one.
-type transcriptIndex struct {
+type Index struct {
 	root    string
 	files   map[string]*fileState
 	records map[string]usageRecord // by message id
 }
 
-func newTranscriptIndex(root string) *transcriptIndex {
-	return &transcriptIndex{
+func NewIndex(root string) *Index {
+	return &Index{
 		root:    root,
 		files:   map[string]*fileState{},
 		records: map[string]usageRecord{},
@@ -109,9 +111,9 @@ func transcriptSession(root, path string) (string, bool) {
 	return strings.TrimSuffix(parts[1], ".jsonl"), true
 }
 
-// refresh ingests new transcript content and drops records older than
+// Refresh ingests new transcript content and drops records older than
 // cutoff, which also bounds which files are worth reading.
-func (ix *transcriptIndex) refresh(ctx context.Context, cutoff time.Time) error {
+func (ix *Index) Refresh(ctx context.Context, cutoff time.Time) error {
 	seen := map[string]bool{}
 	err := filepath.WalkDir(ix.root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -164,7 +166,7 @@ func (ix *transcriptIndex) refresh(ctx context.Context, cutoff time.Time) error 
 	return nil
 }
 
-func (ix *transcriptIndex) ingest(path, session string, st *fileState) error {
+func (ix *Index) ingest(path, session string, st *fileState) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -191,7 +193,7 @@ func (ix *transcriptIndex) ingest(path, session string, st *fileState) error {
 
 var usageMarker = []byte(`"usage"`)
 
-func (ix *transcriptIndex) addLine(line []byte, session string) {
+func (ix *Index) addLine(line []byte, session string) {
 	if !bytes.Contains(line, usageMarker) {
 		return
 	}
@@ -223,9 +225,9 @@ func (ix *transcriptIndex) addLine(line []byte, session string) {
 	ix.records[tl.Message.ID] = rec
 }
 
-// weights sums the weighted tokens per Claude session over [from, to], and
+// Weights sums the weighted tokens per Claude session over [from, to], and
 // across all of them.
-func (ix *transcriptIndex) weights(from, to time.Time) (perSession map[string]float64, total float64) {
+func (ix *Index) Weights(from, to time.Time) (perSession map[string]float64, total float64) {
 	perSession = map[string]float64{}
 	for _, rec := range ix.records {
 		if rec.at.Before(from) || rec.at.After(to) {
