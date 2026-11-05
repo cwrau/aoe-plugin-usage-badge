@@ -103,10 +103,15 @@ and the [plugin API reference](https://agent-of-empires.com/docs/api/plugin-api/
 
 ## Release
 
-Push a `v0.1.0`-style tag to run the release workflow: it
-runs checks, generates the changelog from conventional commits, and publishes a
-GitHub Release with a source archive and `sha256`. To get listed in the Agent of
-Empires featured index, see the authoring guide's publishing section.
+Releases are cut by [release-please](https://github.com/googleapis/release-please).
+On every push to `main` the release workflow keeps a release PR up to date from
+the conventional commits since the last release: it bumps the version (in
+`.github/release-please/manifest.json` and the manifest's `version` in
+`aoe-plugin.toml`) and writes `CHANGELOG.md`. Merging that PR creates the `vX.Y.Z`
+tag and GitHub Release, and the workflow attaches a source archive and its
+`sha256`. Before 1.0 a breaking change (`feat!:`) bumps the minor version. To get
+listed in the Agent of Empires featured index, see the authoring guide's
+publishing section.
 
 ## License
 

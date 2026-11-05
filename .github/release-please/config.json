@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "go",
+  "changelog-sections": [
+    {
+      "type": "feat",
+      "section": "Features"
+    },
+    {
+      "type": "fix",
+      "section": "Bug Fixes"
+    },
+    {
+      "type": "chore",
+      "section": "Miscellaneous Chores"
+    }
+  ],
+  "include-component-in-tag": false,
+  "bump-minor-pre-major": true,
+  "pull-request-title-pattern": "chore${scope}: [bot] release ${version}",
+  "packages": {
+    ".": {
+      "package-name": "aoe-plugin-usage-badge",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "aoe-plugin.toml"
+        }
+      ]
+    }
+  }
+}

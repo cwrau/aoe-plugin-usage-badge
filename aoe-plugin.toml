@@ -7,7 +7,7 @@
 
 id = "io.cwrau.usage-badge"
 name = "Usage Badge"
-version = "0.1.0"
+version = "0.1.0" # x-release-please-version
 # Manifest schema / host API version. The host rejects a manifest whose
 # api_version it does not support.
 # The composer-action slot needs api_version >= 8.
