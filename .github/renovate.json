@@ -5,5 +5,7 @@
   ],
   "postUpdateOptions": [
     "gomodTidy"
-  ]
+  ],
+  "automerge": true,
+  "platformAutomerge": true
 }
