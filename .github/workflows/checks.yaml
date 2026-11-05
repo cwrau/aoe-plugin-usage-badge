@@ -1,0 +1,38 @@
+name: Checks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  manifest:
+    name: Validate manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Parse aoe-plugin.toml
+        run: |
+          python3 - <<'PY'
+          import tomllib
+          with open("aoe-plugin.toml", "rb") as f:
+              tomllib.load(f)
+          print("aoe-plugin.toml parses as TOML")
+          PY
+
+  go:
+    name: Lint, vet, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go run -C magefiles mage.go -w .. check
+      - run: go run -C magefiles mage.go -w .. build
+

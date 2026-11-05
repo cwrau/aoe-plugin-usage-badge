@@ -1,0 +1,86 @@
+# Usage Badge -- an Agent of Empires plugin.
+#
+# Manifest schema: aoe-plugin-api/src/manifest.rs in agent-of-empires. The host
+# parses this strictly (deny_unknown_fields), so every key must match a field in
+# that schema. Field-by-field reference:
+# https://agent-of-empires.com/docs/api/plugin-api/
+
+id = "io.cwrau.usage-badge"
+name = "Usage Badge"
+version = "0.1.0"
+# Manifest schema / host API version. The host rejects a manifest whose
+# api_version it does not support.
+# The composer-action slot needs api_version >= 8.
+api_version = 8
+# Host-app compatibility range (a different axis from api_version). The host
+# refuses install/update outside this range. Requires api_version >= 4.
+# composer-action first shipped in aoe 1.13.0.
+aoe_version = ">=1.13.0, <2.0.0"
+description = "Status-bar badge for Claude Code's subscription usage limits (current session / current week), plus each session's estimated share in its composer."
+
+# Capability grants are prompted at install and pinned to the manifest hash.
+# Declare only what the worker actually uses. `runtime.worker` is required to run
+# any plugin code at all. Add more (net, session.read, notifications, ...) as the
+# worker grows; see the capability table in the plugin API reference.
+#   runtime.worker: run the worker at all.
+#   net:            the worker calls Anthropic's OAuth usage endpoint itself.
+#   fs.read:        the worker reads Claude Code's stored login and transcripts,
+#                   and AoE's session store, outside the plugin directory.
+capabilities = ["runtime.worker", "net", "fs.read"]
+
+# Commands the plugin contributes (palette / CLI), namespaced by the host as
+# plugin.io.cwrau.usage-badge.<id>. The command-id -> worker RPC mapping is
+# host convention; the worker answers a method ending in `.status`.
+[[commands]]
+id = "status"
+title = "Usage Badge: status"
+description = "Show the Usage Badge status summary."
+
+# A setting, rendered on the TUI and web settings surfaces and stored under
+# [plugins."io.cwrau.usage-badge".settings]. The worker reads it back at
+# runtime via the config.get host RPC.
+[[settings]]
+key = "enabled"
+label = "Enable Usage Badge"
+description = "Master toggle for the plugin's behavior."
+type = "boolean"
+default = true
+
+# No default: an unset value comes back from config.get as null, which the
+# worker treats as "no fallback configured".
+[[settings]]
+key = "session_id"
+label = "Claude Code session ID (fallback)"
+description = "Optional. A resumable Claude Code session (the id `claude --resume <id>` takes). The worker reads usage from Anthropic's API with Claude Code's stored login; only when that fails does it fall back to running `/usage` in this session, which is much slower. With no stored login and no session ID the badge shows N/A."
+type = "string"
+
+# A UI extension point. The host renders the slot; the worker pushes display
+# state through the ui.state.set host RPC. `status-bar` is global (no
+# session_id) and renders text/tooltip/tone/icon/href, or an `items` list whose
+# same-`group` entries collapse into one chip that cycles on tap, pushed by the
+# worker.
+[[ui]]
+slot = "status-bar"
+id = "usage-badge"
+
+# `composer-action` is per-session: a button beside the ACP composer controls.
+# The worker pushes each live session's estimated share of the 5h limit as its
+# label; a click is forwarded to the worker as a notification and flips the
+# button to the weekly share. Dashboard only, the TUI can't render it.
+[[ui]]
+slot = "composer-action"
+id = "usage-share"
+
+# Tier 1 worker: the executable the host spawns and supervises, speaking ndjson
+# JSON-RPC over stdio. The entrypoint MUST be plugin-relative so the daemon's
+# PATH never decides whether the worker launches. The build steps run in the
+# user's interactive shell at install/update, where PATH is reliable. They build
+# into .aoe-build/ (the host's BUILD_OUTPUT_DIR), which the host excludes from
+# the plugin tree hash. Scoped to posix.
+[runtime]
+kind = "command"
+command = [".aoe-build/usage-badge-worker"]
+
+[[runtime.build]]
+command = ["go", "build", "-o", ".aoe-build/usage-badge-worker", "."]
+platforms = ["linux", "macos"]
